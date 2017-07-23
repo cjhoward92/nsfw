@@ -15,19 +15,22 @@ public:
   static void cleanupEventCallback(void *arg);
   static void fireErrorCallback(uv_async_t *handle);
   static void fireEventCallback(uv_async_t *handle);
-  static void pollForEvents(void *arg);
+  static void fireWatcherCallback(uv_async_t *handle);
+  static void cleanUpWatcherBatonAndHandle(uv_handle_t *handle);
+  static void throttledWatcherCallback(uv_work_t *req);
 
   Persistent<v8::Object> mPersistentHandle;
   uint32_t mDebounceMS;
+  uint64_t mLastScheduledCallback;
   uv_async_t mErrorCallbackAsync;
   uv_async_t mEventCallbackAsync;
+  uv_async_t *mWatcherCallbackHandle;
   Callback *mErrorCallback;
   Callback *mEventCallback;
   NativeInterface *mInterface;
   uv_mutex_t mInterfaceLock;
   bool mInterfaceLockValid;
   std::string mPath;
-  uv_thread_t mPollThread;
   bool mRunning;
 private:
   NSFW(uint32_t debounceMS, std::string path, Callback *eventCallback, Callback *errorCallback);
@@ -41,6 +44,10 @@ private:
   struct EventBaton {
     NSFW *nsfw;
     std::vector<Event *> *events;
+  };
+
+  struct WatchBaton {
+    NSFW *nsfw;
   };
 
   static NAN_METHOD(JSNew);

@@ -1,4 +1,11 @@
-const { NSFW } = require('../../build/Release/nsfw.node');
+let inner;
+try {
+  inner = require('../../build/Release/nsfw.node');
+} catch (e) {
+  inner = require('../../build/Debug/nsfw.node');
+}
+
+const { NSFW } = inner;
 const fse = require('promisify-node')(require('fs-extra'));
 const path = require('path');
 const _isInteger = require('lodash.isinteger');

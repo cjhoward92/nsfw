@@ -7,14 +7,7 @@ EventQueue::EventQueue() {
 }
 
 EventQueue::~EventQueue() {
-  while(!OPA_Queue_is_empty(&mQueue)) {
-    EventNode *node;
-
-    OPA_Queue_dequeue(&mQueue, node, EventNode, header);
-
-    delete node->event;
-    delete node;
-  }
+  clear();
 }
 
 void EventQueue::clear() {
@@ -31,7 +24,6 @@ void EventQueue::clear() {
 
 int EventQueue::count() {
   return OPA_load_int(&mNumEvents);
-  return 0;
 }
 
 Event *EventQueue::dequeue() {

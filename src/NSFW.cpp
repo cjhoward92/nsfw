@@ -103,39 +103,58 @@ void NSFW::fireEventCallback(uv_async_t *handle) {
   uv_thread_create(&cleanup, NSFW::cleanupEventCallback, baton);
 }
 
-void NSFW::pollForEvents(void *arg) {
-  NSFW *nsfw = (NSFW *)arg;
+void NSFW::fireWatcherCallback(uv_async_t *handle) {
+  WatchBaton *watch = (WatchBaton *)handle->data;
+  NSFW *nsfw = watch->nsfw;
+
+  uv_mutex_lock(&nsfw->mInterfaceLock);
+
+  if (nsfw->mInterface->hasErrored()) {
+    ErrorBaton *baton = new ErrorBaton;
+    baton->nsfw = nsfw;
+    baton->error = nsfw->mInterface->getError();
+
+    nsfw->mErrorCallbackAsync.data = (void *)baton;
+    uv_async_send(&nsfw->mErrorCallbackAsync);
+    nsfw->mRunning = false;
+    uv_mutex_unlock(&nsfw->mInterfaceLock);
+    return;
+  }
+  std::vector<Event *> *events = nsfw->mInterface->getEvents();
+  if (events == NULL) {
+    uv_mutex_unlock(&nsfw->mInterfaceLock);
+    sleep_for_ms(50); 
+    return;
+  }
+
+  EventBaton *baton = new EventBaton;
+  baton->nsfw = nsfw;
+  baton->events = events;
+
+  nsfw->mEventCallbackAsync.data = (void *)baton;
+  uv_async_send(&nsfw->mEventCallbackAsync);
+
+  uv_mutex_unlock(&nsfw->mInterfaceLock);
+}
+
+void NSFW::cleanUpWatcherBatonAndHandle(uv_handle_t *handle) {
+  WatchBaton *baton = reinterpret_cast<WatchBaton *>(handle->data);
+  delete baton;
+  delete reinterpret_cast<uv_async_t *>(handle);
+}
+
+void NSFW::throttledWatcherCallback(uv_work_t *req) {
+  NSFW *nsfw = (NSFW*)req->data;
+
   while(nsfw->mRunning) {
-    uv_mutex_lock(&nsfw->mInterfaceLock);
-
-    if (nsfw->mInterface->hasErrored()) {
-      ErrorBaton *baton = new ErrorBaton;
-      baton->nsfw = nsfw;
-      baton->error = nsfw->mInterface->getError();
-
-      nsfw->mErrorCallbackAsync.data = (void *)baton;
-      uv_async_send(&nsfw->mErrorCallbackAsync);
-      nsfw->mRunning = false;
-      uv_mutex_unlock(&nsfw->mInterfaceLock);
-      break;
-    }
-    std::vector<Event *> *events = nsfw->mInterface->getEvents();
-    if (events == NULL) {
-      uv_mutex_unlock(&nsfw->mInterfaceLock);
-      sleep_for_ms(50);
+    uint64_t now = uv_hrtime() / 1000000;
+    if ((now - nsfw->mLastScheduledCallback) < nsfw->mDebounceMS) {
       continue;
     }
 
-    EventBaton *baton = new EventBaton;
-    baton->nsfw = nsfw;
-    baton->events = events;
+    uv_async_send(nsfw->mWatcherCallbackHandle);
 
-    nsfw->mEventCallbackAsync.data = (void *)baton;
-    uv_async_send(&nsfw->mEventCallbackAsync);
-
-    uv_mutex_unlock(&nsfw->mInterfaceLock);
-
-    sleep_for_ms(nsfw->mDebounceMS);
+    nsfw->mLastScheduledCallback = now;
   }
 }
 
@@ -222,6 +241,14 @@ NSFW::StartWorker::StartWorker(NSFW *nsfw, Callback *callback):
   }
 
 void NSFW::StartWorker::Execute() {
+  mNSFW->mLastScheduledCallback = uv_hrtime() / 1000000;
+  mNSFW->mWatcherCallbackHandle = new uv_async_t;
+  uv_async_init(uv_default_loop(), mNSFW->mWatcherCallbackHandle, &NSFW::fireWatcherCallback);
+
+  WatchBaton *baton = new WatchBaton;
+  baton->nsfw = mNSFW;
+  mNSFW->mWatcherCallbackHandle->data = reinterpret_cast<void *>(baton);
+
   uv_mutex_lock(&mNSFW->mInterfaceLock);
 
   if (mNSFW->mInterface != NULL) {
@@ -232,7 +259,9 @@ void NSFW::StartWorker::Execute() {
   mNSFW->mInterface = new NativeInterface(mNSFW->mPath);
   if (mNSFW->mInterface->isWatching()) {
     mNSFW->mRunning = true;
-    uv_thread_create(&mNSFW->mPollThread, NSFW::pollForEvents, mNSFW);
+    uv_work_t req;
+    req.data = (void*)mNSFW;
+    uv_queue_work(uv_default_loop(), &req, &NSFW::throttledWatcherCallback, nullptr);
   } else {
     delete mNSFW->mInterface;
     mNSFW->mInterface = NULL;
@@ -299,8 +328,6 @@ void NSFW::StopWorker::Execute() {
 
   mNSFW->mRunning = false;
 
-  uv_thread_join(&mNSFW->mPollThread);
-
   delete mNSFW->mInterface;
   mNSFW->mInterface = NULL;
 
@@ -317,6 +344,7 @@ void NSFW::StopWorker::HandleOKCallback() {
 
   uv_close(reinterpret_cast<uv_handle_t*>(&mNSFW->mErrorCallbackAsync), nullptr);
   uv_close(reinterpret_cast<uv_handle_t*>(&mNSFW->mEventCallbackAsync), nullptr);
+  uv_close(reinterpret_cast<uv_handle_t*>(&mNSFW->mWatcherCallbackHandle), &NSFW::cleanUpWatcherBatonAndHandle);
 
   callback->Call(0, NULL);
 }
