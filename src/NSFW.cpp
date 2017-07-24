@@ -104,7 +104,7 @@ void NSFW::fireEventCallback(uv_async_t *handle) {
 }
 
 void NSFW::fireWatcherCallback(uv_async_t *handle) {
-  WatchBaton *watch = (WatchBaton *)handle->data;
+  WatchBaton *watch = reinterpret_cast<WatchBaton *>(handle->data);
   NSFW *nsfw = watch->nsfw;
 
   uv_mutex_lock(&nsfw->mInterfaceLock);
