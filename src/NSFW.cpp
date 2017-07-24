@@ -344,7 +344,7 @@ void NSFW::StopWorker::HandleOKCallback() {
 
   uv_close(reinterpret_cast<uv_handle_t*>(&mNSFW->mErrorCallbackAsync), nullptr);
   uv_close(reinterpret_cast<uv_handle_t*>(&mNSFW->mEventCallbackAsync), nullptr);
-  uv_close(reinterpret_cast<uv_handle_t*>(&mNSFW->mWatcherCallbackHandle), &NSFW::cleanUpWatcherBatonAndHandle);
+  uv_close(reinterpret_cast<uv_handle_t*>(mNSFW->mWatcherCallbackHandle), &NSFW::cleanUpWatcherBatonAndHandle);
 
   callback->Call(0, NULL);
 }
