@@ -46,10 +46,6 @@ private:
     std::vector<Event *> *events;
   };
 
-  struct WatchBaton {
-    NSFW *nsfw;
-  };
-
   static NAN_METHOD(JSNew);
 
   static NAN_METHOD(Start);

@@ -23,6 +23,10 @@ NSFW::NSFW(uint32_t debounceMS, std::string path, Callback *eventCallback, Callb
     v8::Local<v8::Object> obj = New<v8::Object>();
     mPersistentHandle.Reset(obj);
     mInterfaceLockValid = uv_mutex_init(&mInterfaceLock) == 0;
+
+    mLastScheduledCallback = uv_hrtime() / 1000000;
+    mWatcherCallbackHandle = new uv_async_t;
+    uv_async_init(uv_default_loop(), mWatcherCallbackHandle, &NSFW::fireWatcherCallback);
   }
 
 NSFW::~NSFW() {
@@ -104,8 +108,7 @@ void NSFW::fireEventCallback(uv_async_t *handle) {
 }
 
 void NSFW::fireWatcherCallback(uv_async_t *handle) {
-  WatchBaton *watch = reinterpret_cast<WatchBaton *>(handle->data);
-  NSFW *nsfw = watch->nsfw;
+  NSFW *nsfw = (NSFW *)(handle->data);
 
   uv_mutex_lock(&nsfw->mInterfaceLock);
 
@@ -138,8 +141,6 @@ void NSFW::fireWatcherCallback(uv_async_t *handle) {
 }
 
 void NSFW::cleanUpWatcherBatonAndHandle(uv_handle_t *handle) {
-  WatchBaton *baton = reinterpret_cast<WatchBaton *>(handle->data);
-  delete baton;
   delete reinterpret_cast<uv_async_t *>(handle);
 }
 
@@ -241,14 +242,7 @@ NSFW::StartWorker::StartWorker(NSFW *nsfw, Callback *callback):
   }
 
 void NSFW::StartWorker::Execute() {
-  mNSFW->mLastScheduledCallback = uv_hrtime() / 1000000;
-  mNSFW->mWatcherCallbackHandle = new uv_async_t;
-  uv_async_init(uv_default_loop(), mNSFW->mWatcherCallbackHandle, &NSFW::fireWatcherCallback);
-
-  WatchBaton *baton = new WatchBaton;
-  baton->nsfw = mNSFW;
-  mNSFW->mWatcherCallbackHandle->data = reinterpret_cast<void *>(baton);
-
+  mNSFW->mWatcherCallbackHandle->data = (void *)mNSFW;
   uv_mutex_lock(&mNSFW->mInterfaceLock);
 
   if (mNSFW->mInterface != NULL) {
